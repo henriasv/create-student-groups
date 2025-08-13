@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Student Group Generator</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="row space-between">
+        <h1>Student Group Generator</h1>
+        <a target="_blank" href="sample_students.csv">Download sample CSV</a>
+      </header>
+
+      <div id="dashboard" class="dashboard">
+        <aside class="sidebar card">
+          <h2>Setup</h2>
+          <form id="setup-form">
+            <label for="csv">CSV file (headers: name,program)</label>
+            <input id="csv" name="csv" type="file" accept=".csv" required />
+
+            <div class="row">
+              <div>
+                <label for="group_size">Group size</label>
+                <div class="size-field">
+                  <input id="group_size" name="group_size" type="number" min="1" value="4" required />
+                  <div class="stepper">
+                    <button id="dec-size" type="button" title="Decrease group size">−</button>
+                    <button id="inc-size" type="button" title="Increase group size">+</button>
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label for="seed">Seed (optional)</label>
+                <input id="seed" name="seed" type="number" />
+              </div>
+            </div>
+
+            <button type="submit">Generate Groups</button>
+          </form>
+
+          <div class="card" style="margin-top:12px;">
+            <h3>Controls</h3>
+            <div class="row gap">
+              <button id="validate" disabled>Validate</button>
+              <button id="reshuffle" disabled>Reshuffle (respect locks)</button>
+            </div>
+            <div class="row gap" style="margin-top:12px;">
+              <label for="theme">Group naming theme</label>
+              <select id="theme" name="theme">
+                <option value="numeric" selected>Numeric (Group 1)</option>
+                <option value="greek">Greek letters (Alpha, Beta...)</option>
+                <option value="colors">Colors</option>
+                <option value="animals">Animals</option>
+                <option value="planets">Planets</option>
+                <option value="norse">Norse gods</option>
+              </select>
+            </div>
+            <div class="row gap" style="margin-top:12px;">
+              <button id="export-csv" disabled>Export CSV</button>
+              <button id="export-md" disabled>Export Markdown</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top:12px;">
+            <h3>CSV format</h3>
+            <p>Required columns: <code>name</code>, <code>program</code>.</p>
+<pre><code>name,program
+Alice,CS
+Bob,Math
+Charlie,Physics
+</code></pre>
+
+            <h3>Legend</h3>
+            <div class="legend"><span class="dot locked"></span> Locked (🔒)</div>
+            <div class="legend"><span class="dot"></span> Unlocked (🔓)</div>
+          </div>
+        </aside>
+
+        <section id="groups" class="groups-area">
+          <div class="card" id="placeholder" style="grid-column: 1/-1; text-align:center; padding:24px;">
+            <p>Groups will appear here after you generate them.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+  </body>
+  </html>
+
+
