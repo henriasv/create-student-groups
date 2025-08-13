@@ -8,6 +8,23 @@ function mulberry32(a) {
   }
 }
 
+// Generate distinct colors for study programs
+function getProgramColors(programs) {
+  // ColorBrewer qualitative palette - colorblind safe
+  const colors = [
+    '#E69F00', '#56B4E9', '#009E73', '#F0E442', '#0072B2', 
+    '#D55E00', '#CC79A7', '#999999', '#E69F00', '#56B4E9', 
+    '#009E73', '#F0E442', '#0072B2', '#D55E00', '#CC79A7', 
+    '#999999', '#E69F00', '#56B4E9', '#009E73', '#F0E442'
+  ];
+  
+  const programColors = {};
+  programs.forEach((program, index) => {
+    programColors[program] = colors[index % colors.length];
+  });
+  return programColors;
+}
+
 function shuffleInPlace(arr, rng) {
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor((rng ? rng() : Math.random()) * (i + 1));
@@ -296,6 +313,11 @@ function renderGroups(groups) {
   if (els.placeholder) els.placeholder.remove();
   els.groups.innerHTML = '';
   const names = themedGroupNames(groups.length, state.theme);
+  
+  // Generate colors for each unique program
+  const uniquePrograms = [...new Set(groups.flatMap(g => g.students.map(s => s.program)))];
+  const programColors = getProgramColors(uniquePrograms);
+  
   // Set minHeight to match sidebar to reduce jump; will expand if content exceeds
   const sidebar = document.querySelector('.sidebar');
   const shell = document.getElementById('groups-shell');
@@ -315,14 +337,14 @@ function renderGroups(groups) {
       <ul class="student-list" data-list="${g.index}"></ul>
     `;
     const list = section.querySelector('.student-list');
-    for (const s of g.students) list.appendChild(createStudentLi(s));
+    for (const s of g.students) list.appendChild(createStudentLi(s, programColors));
     els.groups.appendChild(section);
   }
   bindDnD();
   bindLockButtons();
 }
 
-function createStudentLi(s) {
+function createStudentLi(s, programColors) {
   const li = document.createElement('li');
   li.className = 'student';
   li.dataset.name = s.name;
@@ -330,7 +352,8 @@ function createStudentLi(s) {
   li.dataset.locked = s.locked ? 'true' : 'false';
   if (s.locked) li.classList.add('is-locked');
   const lockIcon = s.locked ? '🔒' : '🔓';
-  li.innerHTML = `<span class="name">${s.name}</span><span class="actions"><span class="tag">${s.program}</span><button class="lock-btn" title="Toggle lock" aria-label="Toggle lock" draggable="false">${lockIcon}</button></span>`;
+  const programColor = programColors[s.program] || '#666';
+  li.innerHTML = `<span class="name">${s.name}</span><span class="actions"><span class="tag" style="background-color: ${programColor}">${s.program}</span><button class="lock-btn" title="Toggle lock" aria-label="Toggle lock" draggable="false">${lockIcon}</button></span>`;
   li.setAttribute('draggable', 'true');
   return li;
 }
