@@ -334,6 +334,7 @@ const els = {
   placeholder: document.getElementById('placeholder'),
   exportCsv: document.getElementById('export-csv'),
   exportMd: document.getElementById('export-md'),
+  studentView: document.getElementById('student-view'),
   theme: document.getElementById('theme'),
   incSize: document.getElementById('inc-size'),
   decSize: document.getElementById('dec-size'),
@@ -356,6 +357,7 @@ state.groupSize = parseInt(els.groupSize.value || '4', 10) || 0;
 function enableControls(enabled) {
   els.exportCsv.disabled = !enabled;
   els.exportMd.disabled = !enabled;
+  els.studentView.disabled = !enabled;
   // Keep steppers usable pre-generation so users can set size first
 }
 
@@ -568,6 +570,169 @@ function exportMarkdown(groups, theme) {
   }
 }
 
+function openStudentView(groups, theme) {
+  const names = themedGroupNames(groups.length, theme);
+  
+  // Generate colors for each unique program
+  const uniquePrograms = [...new Set(groups.flatMap(g => g.students.map(s => s.program)))];
+  const programColors = getProgramColors(uniquePrograms);
+  
+  // Create clean HTML for student view
+  const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Groups</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #f8fafc;
+            color: #1e293b;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .header h1 {
+            margin: 0;
+            color: #1e293b;
+            font-size: 2.5rem;
+        }
+        .groups-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .group {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border: 2px solid #e2e8f0;
+        }
+        .group-header {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        .group-header h2 {
+            margin: 0;
+            color: #1e293b;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+        .student-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .student {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f5f9;
+        }
+        .student:last-child {
+            border-bottom: none;
+        }
+        .student-name {
+            font-weight: 500;
+            color: #1e293b;
+        }
+        .program-tag {
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: white;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .group-warning {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 15px;
+            font-size: 0.875rem;
+            color: #92400e;
+        }
+        .warning-icon {
+            margin-right: 6px;
+        }
+        @media print {
+            body { background: white; }
+            .group { box-shadow: none; border: 1px solid #ccc; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Student Groups</h1>
+        </div>
+        <div class="groups-grid">
+            ${groups.map((g, i) => {
+                const warningHtml = g.missingPrograms ? `
+                    <div class="group-warning">
+                        <span class="warning-icon">⚠️</span>
+                        Missing: ${g.missingPrograms.join(', ')}
+                    </div>
+                ` : '';
+                
+                return `
+                    <div class="group">
+                        <div class="group-header">
+                            <h2>${names[i]}</h2>
+                        </div>
+                        ${warningHtml}
+                        <ul class="student-list">
+                            ${g.students.map(s => {
+                                const programColor = programColors[s.program] || '#666';
+                                return `
+                                    <li class="student">
+                                        <span class="student-name">${s.name}</span>
+                                        <span class="program-tag" style="background-color: ${programColor}">${s.program}</span>
+                                    </li>
+                                `;
+                            }).join('')}
+                        </ul>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+    </div>
+</body>
+</html>`;
+  
+  // Open in new tab
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    // Popup blocked: fall back to creating a new tab via anchor
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+}
+
 els.setupForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
@@ -589,11 +754,6 @@ els.setupForm.addEventListener('submit', async (e) => {
       state.groups = reshuffled;
       renderGroups(state.groups);
       enableControls(true);
-      
-      // Save groups to current class if class name is present
-      if (els.className && els.className.value.trim()) {
-        updateClassWithGroups(els.className.value.trim(), state.groups);
-      }
       return;
     }
 
@@ -607,11 +767,6 @@ els.setupForm.addEventListener('submit', async (e) => {
     state.lastCsvText = text;
     renderGroups(state.groups);
     enableControls(true);
-    
-    // Save groups to current class if class name is present
-    if (els.className && els.className.value.trim()) {
-      updateClassWithGroups(els.className.value.trim(), state.groups);
-    }
   } catch (err) {
     alert(String(err));
   }
@@ -628,6 +783,12 @@ els.exportMd.addEventListener('click', () => {
   const payload = currentPayload();
   const theme = els.theme ? els.theme.value : 'numeric';
   exportMarkdown(payload.groups, theme);
+});
+
+els.studentView.addEventListener('click', () => {
+  const payload = currentPayload();
+  const theme = els.theme ? els.theme.value : 'numeric';
+  openStudentView(payload.groups, theme);
 });
 
 
@@ -754,29 +915,47 @@ function loadClassFromHistory(className) {
 
 function createClassHistoryList() {
   const history = getClassHistory();
-  if (history.length === 0) return null;
   
   const container = document.createElement('div');
   container.className = 'saved-classes';
-  container.innerHTML = `
-    <label>Saved classes:</label>
-    <div class="class-list">
-      ${history.slice(0, 4).map(classData => `
-        <div class="class-item">
-          <div class="class-content" onclick="loadClassFromList('${classData.name}')">
-            <div class="class-name">${classData.name}</div>
-            <div class="class-meta">${new Date(classData.timestamp).toLocaleDateString()} • ${classData.size} chars</div>
+  
+  if (history.length === 0) {
+    // Show example class when no saved classes exist
+    container.innerHTML = `
+      <label>Saved classes:</label>
+      <div class="class-list">
+        <div class="class-item example-class">
+          <div class="class-content" onclick="loadExampleClass()">
+            <div class="class-name">Example Class</div>
+            <div class="class-meta">Click to load sample data</div>
           </div>
-          <button class="delete-btn" onclick="deleteClass('${classData.name}')" title="Delete class">🗑️</button>
         </div>
-      `).join('')}
-      ${history.length > 4 ? `
-        <button class="more-btn" onclick="showAllClassesModal(${JSON.stringify(history).replace(/"/g, '&quot;')})">
-          Show ${history.length - 4} more classes...
-        </button>
-      ` : ''}
-    </div>
-  `;
+      </div>
+    `;
+  } else {
+    // Show up to 4 most recent saved classes
+    const recent = history.slice(0, 4);
+    const visibleSorted = recent.slice().sort((a, b) => a.name.localeCompare(b.name));
+    container.innerHTML = `
+      <label>Saved classes:</label>
+      <div class="class-list">
+        ${visibleSorted.map(classData => `
+          <div class="class-item">
+            <div class="class-content" onclick="loadClassFromList('${classData.name}')">
+              <div class="class-name">${classData.name}</div>
+              <div class="class-meta">${new Date(classData.timestamp).toLocaleDateString()} • ${classData.size} chars</div>
+            </div>
+            <button class="delete-btn" onclick="deleteClass('${classData.name}')" title="Delete class">🗑️</button>
+          </div>
+        `).join('')}
+        ${history.length > 4 ? `
+          <button class="more-btn" onclick="showAllClassesModal(${JSON.stringify(history).replace(/"/g, '&quot;')})">
+            Show ${history.length - 4} more classes...
+          </button>
+        ` : ''}
+      </div>
+    `;
+  }
   
   return container;
 }
@@ -800,6 +979,14 @@ window.loadClassFromList = function(className) {
       state.lastCsvText = classData.content;
       renderGroups(state.groups);
       enableControls(true);
+    } else {
+      // Clear any existing groups if no saved groups
+      state.groups = [];
+      state.programs = [];
+      state.groupSize = 0;
+      state.lastCsvText = '';
+      renderGroups([]);
+      enableControls(false);
     }
   }
 };
@@ -811,6 +998,33 @@ window.deleteClass = function(className) {
     const updatedHistory = history.filter(item => item.name !== className);
     localStorage.setItem(CLASS_HISTORY_KEY, JSON.stringify(updatedHistory));
     updateClassHistoryUI();
+  }
+};
+
+// Global function for loading example class
+window.loadExampleClass = function() {
+  const exampleCSV = `name,program
+Alice,Computer Science
+Bob,Mathematics
+Charlie,Physics
+Dana,Computer Science
+Evan,Mathematics
+Fay,Physics
+Gus,Computer Science
+Hana,Mathematics
+Iris,Physics
+Jack,Computer Science
+Kira,Mathematics
+Liam,Physics
+Mona,Computer Science
+Nils,Mathematics
+Ola,Physics`;
+  
+  if (els.csvText) {
+    els.csvText.value = exampleCSV;
+  }
+  if (els.className) {
+    els.className.value = 'Example Class';
   }
 };
 
@@ -858,6 +1072,14 @@ window.loadClassFromModal = function(className) {
       state.lastCsvText = classData.content;
       renderGroups(state.groups);
       enableControls(true);
+    } else {
+      // Clear any existing groups if no saved groups
+      state.groups = [];
+      state.programs = [];
+      state.groupSize = 0;
+      state.lastCsvText = '';
+      renderGroups([]);
+      enableControls(false);
     }
   }
 };
@@ -872,11 +1094,10 @@ function updateClassHistoryUI() {
   // Add new history list if there are classes
   const historyList = createClassHistoryList();
   if (historyList) {
-    // Find the CSV data card and insert the list before the Legend section
-    const csvCard = document.querySelector('.card h3').parentNode;
-    const legendSection = csvCard.querySelector('h3[style*="margin-top:12px"]');
-    if (legendSection) {
-      csvCard.insertBefore(historyList, legendSection);
+    // Insert right after the class-name row in the CSV section
+    const classRow = document.querySelector('.row[style*="margin-top:2px"]');
+    if (classRow && classRow.parentNode) {
+      classRow.parentNode.insertBefore(historyList, classRow.nextSibling);
     }
   }
 }
@@ -956,8 +1177,15 @@ function saveClass() {
     return;
   }
   
-  // Save the class
+  // Save the class with current groups if they exist
   saveClassList(className, content);
+  
+  // If groups exist in the DOM, save the current DOM state (includes locks and manual changes)
+  const payload = currentPayload();
+  if (payload.groups && payload.groups.length > 0) {
+    updateClassWithGroups(className, payload.groups);
+  }
+  
   updateClassHistoryUI();
   
   // Keep the class name in the input field for easy re-saving
@@ -1014,6 +1242,14 @@ function loadLastUsedClass() {
       state.lastCsvText = lastClass.content;
       renderGroups(state.groups);
       enableControls(true);
+    } else {
+      // Clear any existing groups if no saved groups
+      state.groups = [];
+      state.programs = [];
+      state.groupSize = 0;
+      state.lastCsvText = '';
+      renderGroups([]);
+      enableControls(false);
     }
   }
 }

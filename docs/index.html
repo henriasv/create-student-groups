@@ -10,7 +10,7 @@
   <body>
     <main class="container">
       <header class="row space-between">
-        <h1>Student Group Generator</h1>
+        <h1>Interdisciplinary Group Generator</h1>
       </header>
 
       <div id="dashboard" class="dashboard">
@@ -85,10 +85,6 @@ Ola,Physics</textarea>
             <input id="csv" name="csv" type="file" accept=".csv" style="display: none;" />
             
 
-            <h3 style="margin-top:12px;">Legend</h3>
-            <div class="legend"><span class="dot locked"></span> Locked (🔒)</div>
-            <div class="legend"><span class="dot"></span> Unlocked (🔓)</div>
-
             <div style="margin-top:12px;">
               <label for="seed">Seed (optional)</label>
               <input id="seed" name="seed" type="number" />
@@ -99,6 +95,7 @@ Ola,Physics</textarea>
           <div class="groups-toolbar">
             <button id="export-csv" disabled>Export CSV</button>
             <button id="export-md" disabled>Export Markdown</button>
+            <button id="student-view" disabled>Student View</button>
           </div>
           <div id="groups" class="groups-area">
             <div class="placeholder" id="placeholder">
@@ -108,6 +105,17 @@ Ola,Physics</textarea>
         </section>
       </div>
     </main>
+    
+    <footer class="credits">
+              <div class="container">
+          <p>
+            <strong>Interdisciplinary group generator</strong><br>
+            Developed by <strong>Henrik Andersen Sveinsson</strong><br>
+            Contact: <a href="mailto:henriasv@uio.no">henriasv@uio.no</a> | 
+            <a href="https://github.com/henriasv/create-student-groups" target="_blank" rel="noopener noreferrer">GitHub</a>
+          </p>
+        </div>
+    </footer>
   </body>
   </html>
 
