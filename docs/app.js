@@ -85,22 +85,39 @@ function groupStudents(students, groupSize, seed) {
   for (const p of programs) shuffleInPlace(programMap.get(p), rng);
 
   const numGroups = Math.ceil(total / groupSize);
-  // Feasibility check
+  
+  // Check which programs have enough students for all groups
+  const programsWithEnough = [];
+  const programsWithShortage = [];
   for (const p of programs) {
-    if (programMap.get(p).length < numGroups) {
-      throw new Error(`Not enough '${p}' students to cover ${numGroups} groups`);
+    if (programMap.get(p).length >= numGroups) {
+      programsWithEnough.push(p);
+    } else {
+      programsWithShortage.push(p);
     }
   }
 
   const groups = Array.from({ length: numGroups }, () => []);
-  // Assign one of each program to every group
-  for (const p of programs) {
+  
+  // Assign students from programs that have enough for all groups
+  for (const p of programsWithEnough) {
     const bucket = programMap.get(p);
     for (let g = 0; g < numGroups; g++) {
       groups[g].push({ ...bucket.pop(), locked: false });
     }
   }
 
+  // Distribute students from programs with shortages
+  for (const p of programsWithShortage) {
+    const bucket = programMap.get(p);
+    const available = bucket.length;
+    // Distribute evenly across groups
+    for (let g = 0; g < available; g++) {
+      groups[g].push({ ...bucket.pop(), locked: false });
+    }
+  }
+
+  // Distribute remaining students
   const rest = [];
   for (const p of programs) rest.push(...programMap.get(p));
   shuffleInPlace(rest, rng);
@@ -112,11 +129,22 @@ function groupStudents(students, groupSize, seed) {
     }
   }
 
+  // Calculate missing programs for each group
+  const groupsWithWarnings = groups.map((students, i) => {
+    const presentPrograms = new Set(students.map(s => s.program));
+    const missingPrograms = programs.filter(p => !presentPrograms.has(p));
+    return { 
+      index: i + 1, 
+      students,
+      missingPrograms: missingPrograms.length > 0 ? missingPrograms : null
+    };
+  });
+
   return {
     groupSize,
     numGroups,
     programs,
-    groups: groups.map((students, i) => ({ index: i + 1, students }))
+    groups: groupsWithWarnings
   };
 }
 
@@ -215,8 +243,16 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
 
   const numPrograms = programs.length;
   if (numPrograms > groupSize) throw new Error(`group_size (${groupSize}) smaller than number of programs (${numPrograms})`);
+  
+  // Check which programs have enough students for all groups
+  const programsWithEnough = [];
+  const programsWithShortage = [];
   for (const p of programs) {
-    if ((counts[p] || 0) < targetNumGroups) throw new Error(`Not enough '${p}' students to cover ${targetNumGroups} groups`);
+    if ((counts[p] || 0) >= targetNumGroups) {
+      programsWithEnough.push(p);
+    } else {
+      programsWithShortage.push(p);
+    }
   }
 
   // Initialize target groups and present programs
@@ -247,9 +283,9 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
   for (const s of unlockedPool) (queues[s.program] ||= []).push(s);
   for (const p of Object.keys(queues)) shuffleInPlace(queues[p], rng);
 
-  // Fill missing programs per group first
+  // Fill missing programs per group first (only those with enough students)
   for (let i = 0; i < targetNumGroups; i++) {
-    const missing = programs.filter(p => !presentPerGroup[i].has(p));
+    const missing = programsWithEnough.filter(p => !presentPerGroup[i].has(p));
     if (result[i].length + missing.length > groupSize) throw new Error(`Group ${i+1} would exceed size when adding required programs`);
     for (const p of missing) {
       const q = queues[p];
@@ -273,7 +309,18 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
     if (result[minIdx].length < groupSize) result[minIdx].push({ ...s, locked: false });
   }
 
-  return result.map((students, i) => ({ index: i + 1, students }));
+  // Calculate missing programs for each group
+  const groupsWithWarnings = result.map((students, i) => {
+    const presentPrograms = new Set(students.map(s => s.program));
+    const missingPrograms = programs.filter(p => !presentPrograms.has(p));
+    return { 
+      index: i + 1, 
+      students,
+      missingPrograms: missingPrograms.length > 0 ? missingPrograms : null
+    };
+  });
+
+  return groupsWithWarnings;
 }
 
 // UI logic
@@ -290,6 +337,9 @@ const els = {
   theme: document.getElementById('theme'),
   incSize: document.getElementById('inc-size'),
   decSize: document.getElementById('dec-size'),
+  className: document.getElementById('class-name'),
+  saveClass: document.getElementById('save-class'),
+  loadFileLink: document.getElementById('load-file-link'),
 };
 
 let state = {
@@ -329,11 +379,21 @@ function renderGroups(groups) {
     const section = document.createElement('section');
     section.className = 'group';
     section.dataset.groupIndex = String(g.index);
+    
+    // Add warning for missing programs
+    const warningHtml = g.missingPrograms ? `
+      <div class="group-warning">
+        <span class="warning-icon">⚠️</span>
+        Missing: ${g.missingPrograms.join(', ')}
+      </div>
+    ` : '';
+    
     section.innerHTML = `
       <header>
         <h2>${names[g.index - 1] || `Group ${g.index}`}</h2>
         <small><span class="count">${g.students.length}</span> / ${state.groupSize}</small>
       </header>
+      ${warningHtml}
       <ul class="student-list" data-list="${g.index}"></ul>
     `;
     const list = section.querySelector('.student-list');
@@ -529,6 +589,11 @@ els.setupForm.addEventListener('submit', async (e) => {
       state.groups = reshuffled;
       renderGroups(state.groups);
       enableControls(true);
+      
+      // Save groups to current class if class name is present
+      if (els.className && els.className.value.trim()) {
+        updateClassWithGroups(els.className.value.trim(), state.groups);
+      }
       return;
     }
 
@@ -542,6 +607,11 @@ els.setupForm.addEventListener('submit', async (e) => {
     state.lastCsvText = text;
     renderGroups(state.groups);
     enableControls(true);
+    
+    // Save groups to current class if class name is present
+    if (els.className && els.className.value.trim()) {
+      updateClassWithGroups(els.className.value.trim(), state.groups);
+    }
   } catch (err) {
     alert(String(err));
   }
@@ -618,7 +688,210 @@ if (els.theme) {
   });
 }
 
-// When a file is chosen, load its contents into the textarea so the user can see/edit it
+// Class list management
+const CLASS_HISTORY_KEY = 'class_list_history';
+const MAX_HISTORY_SIZE = 20;
+const SHOW_IN_DROPDOWN = 5;
+
+function saveClassList(className, content) {
+  try {
+    const history = getClassHistory();
+    
+    // Remove if class with same name already exists
+    const existingIndex = history.findIndex(item => item.name === className);
+    if (existingIndex !== -1) {
+      history.splice(existingIndex, 1);
+    }
+    
+    // Add new class to beginning
+    history.unshift({
+      name: className,
+      content: content,
+      timestamp: new Date().toISOString(),
+      size: content.length,
+      lastGroups: null // Will be updated when groups are generated
+    });
+    
+    // Keep only the most recent classes
+    if (history.length > MAX_HISTORY_SIZE) {
+      history.splice(MAX_HISTORY_SIZE);
+    }
+    
+    localStorage.setItem(CLASS_HISTORY_KEY, JSON.stringify(history));
+  } catch (err) {
+    console.warn('Could not save class to history:', err);
+  }
+}
+
+function updateClassWithGroups(className, groups) {
+  try {
+    const history = getClassHistory();
+    const classIndex = history.findIndex(item => item.name === className);
+    if (classIndex !== -1) {
+      history[classIndex].lastGroups = groups;
+      localStorage.setItem(CLASS_HISTORY_KEY, JSON.stringify(history));
+    }
+  } catch (err) {
+    console.warn('Could not update class with groups:', err);
+  }
+}
+
+function getClassHistory() {
+  try {
+    const stored = localStorage.getItem(CLASS_HISTORY_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (err) {
+    console.warn('Could not load class history:', err);
+    return [];
+  }
+}
+
+function loadClassFromHistory(className) {
+  const history = getClassHistory();
+  const classData = history.find(item => item.name === className);
+  return classData ? classData.content : null;
+}
+
+function createClassHistoryList() {
+  const history = getClassHistory();
+  if (history.length === 0) return null;
+  
+  const container = document.createElement('div');
+  container.className = 'saved-classes';
+  container.innerHTML = `
+    <label>Saved classes:</label>
+    <div class="class-list">
+      ${history.slice(0, 4).map(classData => `
+        <div class="class-item">
+          <div class="class-content" onclick="loadClassFromList('${classData.name}')">
+            <div class="class-name">${classData.name}</div>
+            <div class="class-meta">${new Date(classData.timestamp).toLocaleDateString()} • ${classData.size} chars</div>
+          </div>
+          <button class="delete-btn" onclick="deleteClass('${classData.name}')" title="Delete class">🗑️</button>
+        </div>
+      `).join('')}
+      ${history.length > 4 ? `
+        <button class="more-btn" onclick="showAllClassesModal(${JSON.stringify(history).replace(/"/g, '&quot;')})">
+          Show ${history.length - 4} more classes...
+        </button>
+      ` : ''}
+    </div>
+  `;
+  
+  return container;
+}
+
+// Global function for loading class from list
+window.loadClassFromList = function(className) {
+  const history = getClassHistory();
+  const classData = history.find(item => item.name === className);
+  if (classData && els.csvText) {
+    els.csvText.value = classData.content;
+    // Also populate the class name field for easy editing
+    if (els.className) {
+      els.className.value = className;
+    }
+    
+    // Load the last groups if they exist
+    if (classData.lastGroups && classData.lastGroups.length > 0) {
+      state.groups = classData.lastGroups;
+      state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
+      state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
+      state.lastCsvText = classData.content;
+      renderGroups(state.groups);
+      enableControls(true);
+    }
+  }
+};
+
+// Global function for deleting a class
+window.deleteClass = function(className) {
+  if (confirm(`Are you sure you want to delete the class "${className}"?`)) {
+    const history = getClassHistory();
+    const updatedHistory = history.filter(item => item.name !== className);
+    localStorage.setItem(CLASS_HISTORY_KEY, JSON.stringify(updatedHistory));
+    updateClassHistoryUI();
+  }
+};
+
+function showAllClassesModal(history) {
+  const modal = document.createElement('div');
+  modal.className = 'modal-overlay';
+  modal.innerHTML = `
+    <div class="modal">
+      <div class="modal-header">
+        <h3>All Saved Classes</h3>
+        <button class="close-btn" onclick="this.closest('.modal-overlay').remove()">×</button>
+      </div>
+      <div class="modal-content">
+        ${history.map(classData => `
+          <div class="file-item">
+            <div class="file-content" onclick="loadClassFromModal('${classData.name}'); this.closest('.modal-overlay').remove();">
+              <div class="file-name">${classData.name}</div>
+              <div class="file-meta">${new Date(classData.timestamp).toLocaleString()} • ${classData.size} chars</div>
+            </div>
+            <button class="delete-btn" onclick="deleteClass('${classData.name}'); this.closest('.modal-overlay').remove();" title="Delete class">🗑️</button>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
+
+// Global function for modal class loading
+window.loadClassFromModal = function(className) {
+  const history = getClassHistory();
+  const classData = history.find(item => item.name === className);
+  if (classData && els.csvText) {
+    els.csvText.value = classData.content;
+    // Also populate the class name field for easy editing
+    if (els.className) {
+      els.className.value = className;
+    }
+    
+    // Load the last groups if they exist
+    if (classData.lastGroups && classData.lastGroups.length > 0) {
+      state.groups = classData.lastGroups;
+      state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
+      state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
+      state.lastCsvText = classData.content;
+      renderGroups(state.groups);
+      enableControls(true);
+    }
+  }
+};
+
+function updateClassHistoryUI() {
+  // Remove existing history list if present
+  const existing = document.querySelector('.saved-classes');
+  if (existing) {
+    existing.remove();
+  }
+  
+  // Add new history list if there are classes
+  const historyList = createClassHistoryList();
+  if (historyList) {
+    // Find the CSV data card and insert the list before the Legend section
+    const csvCard = document.querySelector('.card h3').parentNode;
+    const legendSection = csvCard.querySelector('h3[style*="margin-top:12px"]');
+    if (legendSection) {
+      csvCard.insertBefore(historyList, legendSection);
+    }
+  }
+}
+
+// When the load file link is clicked, trigger file input
+if (els.loadFileLink) {
+  els.loadFileLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (els.csv) {
+      els.csv.click();
+    }
+  });
+}
+
+// When a file is chosen, load its contents into the textarea
 if (els.csv) {
   els.csv.addEventListener('change', async () => {
     const file = els.csv.files && els.csv.files[0];
@@ -630,6 +903,119 @@ if (els.csv) {
       // ignore
     }
   });
+}
+
+// Add drag and drop functionality to the CSV textarea
+if (els.csvText) {
+  els.csvText.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    els.csvText.classList.add('drag-over');
+  });
+
+  els.csvText.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    els.csvText.classList.remove('drag-over');
+  });
+
+  els.csvText.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    els.csvText.classList.remove('drag-over');
+    
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type === 'text/csv' || file.name.endsWith('.csv')) {
+        try {
+          const text = await file.text();
+          els.csvText.value = text;
+        } catch (err) {
+          console.error('Error reading dropped file:', err);
+        }
+      } else {
+        alert('Please drop a CSV file');
+      }
+    }
+  });
+}
+
+// Function to save class (shared between button click and Enter key)
+function saveClass() {
+  const className = els.className ? els.className.value.trim() : '';
+  const content = els.csvText ? els.csvText.value.trim() : '';
+  
+  if (!className) {
+    alert('Please enter a class name');
+    return;
+  }
+  
+  if (!content) {
+    alert('Please enter CSV data to save');
+    return;
+  }
+  
+  // Save the class
+  saveClassList(className, content);
+  updateClassHistoryUI();
+  
+  // Keep the class name in the input field for easy re-saving
+  // Don't clear the class name input
+  
+  // Show confirmation
+  alert(`Class "${className}" saved successfully!`);
+}
+
+// Save class button functionality
+if (els.saveClass) {
+  els.saveClass.addEventListener('click', saveClass);
+}
+
+// Enter key functionality for class name input
+if (els.className) {
+  els.className.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      saveClass();
+    }
+  });
+}
+
+// Initialize class history UI and load last used class on page load
+document.addEventListener('DOMContentLoaded', () => {
+  updateClassHistoryUI();
+  loadLastUsedClass();
+});
+
+// Also try to update when window loads (in case DOMContentLoaded already fired)
+window.addEventListener('load', () => {
+  updateClassHistoryUI();
+  loadLastUsedClass();
+});
+
+function loadLastUsedClass() {
+  const history = getClassHistory();
+  if (history.length > 0 && els.csvText) {
+    // Load the most recent class (first in the array)
+    const lastClass = history[0];
+    els.csvText.value = lastClass.content;
+    
+    // Also populate the class name field for convenience
+    if (els.className) {
+      els.className.value = lastClass.name;
+    }
+    
+    // Load the last groups if they exist
+    if (lastClass.lastGroups && lastClass.lastGroups.length > 0) {
+      state.groups = lastClass.lastGroups;
+      state.programs = [...new Set(lastClass.lastGroups.flatMap(g => g.students.map(s => s.program)))];
+      state.groupSize = Math.max(...lastClass.lastGroups.map(g => g.students.length));
+      state.lastCsvText = lastClass.content;
+      renderGroups(state.groups);
+      enableControls(true);
+    }
+  }
 }
 
 

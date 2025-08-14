@@ -52,14 +52,11 @@
             <button type="submit">Generate Groups</button>
           </form>
 
-          
-            
-            
+<hr style="margin: 16px 0; border: none; border-top: 1px solid var(--border);" />
 
-          <div class="card" style="margin-top:12px;">
-            <h3>CSV data</h3>
-            <p>Paste CSV here or load a file. The sample below is used by default.</p>
-            <textarea id="csv_text">name,program
+<h2>CSV data</h2>
+<p>Paste, drop or <a href="#" id="load-file-link">load a CSV file</a></p>
+<textarea id="csv_text">name,program
 Alice,CS
 Bob,Math
 Charlie,Physics
@@ -76,12 +73,17 @@ Mona,CS
 Nils,Math
 Ola,Physics</textarea>
 
-            <div class="row" style="margin-top:8px; align-items: end;">
-              <div style="flex:1;">
-                <label for="csv">Load CSV file (optional)</label>
-                <input id="csv" name="csv" type="file" accept=".csv" />
-              </div>
-            </div>
+<div class="row" style="margin-top:2px; align-items: end;">
+  <div style="flex:1;">
+    Class name: <input id="class-name" name="class-name" type="text" placeholder="(e.g., CS101 Fall 2024)" />
+  </div>
+  <div>
+    <button id="save-class" type="button" style="margin-top: 2px;">Save Class</button>
+  </div>
+</div>
+
+            <input id="csv" name="csv" type="file" accept=".csv" style="display: none;" />
+            
 
             <h3 style="margin-top:12px;">Legend</h3>
             <div class="legend"><span class="dot locked"></span> Locked (🔒)</div>
@@ -91,7 +93,6 @@ Ola,Physics</textarea>
               <label for="seed">Seed (optional)</label>
               <input id="seed" name="seed" type="number" />
             </div>
-          </div>
         </aside>
 
         <section class="groups-shell card" id="groups-shell">
