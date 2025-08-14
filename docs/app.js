@@ -77,9 +77,6 @@ function groupStudents(students, groupSize, seed) {
   }
   const programs = Array.from(programMap.keys()).sort();
   const numPrograms = programs.length;
-  if (numPrograms > groupSize) {
-    throw new Error(`group_size (${groupSize}) smaller than number of programs (${numPrograms})`);
-  }
 
   const rng = (typeof seed === 'number') ? mulberry32(seed) : undefined;
   for (const p of programs) shuffleInPlace(programMap.get(p), rng);
@@ -98,22 +95,28 @@ function groupStudents(students, groupSize, seed) {
   }
 
   const groups = Array.from({ length: numGroups }, () => []);
-  
-  // Assign students from programs that have enough for all groups
+
+  // Assign students trying to include as many distinct programs as possible
   for (const p of programsWithEnough) {
     const bucket = programMap.get(p);
     for (let g = 0; g < numGroups; g++) {
-      groups[g].push({ ...bucket.pop(), locked: false });
+      if (groups[g].length < groupSize && bucket.length > 0) {
+        groups[g].push({ ...bucket.pop(), locked: false });
+      }
     }
   }
 
   // Distribute students from programs with shortages
   for (const p of programsWithShortage) {
     const bucket = programMap.get(p);
-    const available = bucket.length;
-    // Distribute evenly across groups
-    for (let g = 0; g < available; g++) {
-      groups[g].push({ ...bucket.pop(), locked: false });
+    let g = 0;
+    while (bucket.length > 0) {
+      if (groups[g].length < groupSize) {
+        groups[g].push({ ...bucket.pop(), locked: false });
+      }
+      g = (g + 1) % numGroups;
+      // if all full, break
+      if (groups.every(gr => gr.length >= groupSize)) break;
     }
   }
 
@@ -127,6 +130,7 @@ function groupStudents(students, groupSize, seed) {
     for (const g of groups) {
       if (g.length < groupSize) { g.push({ ...s, locked: false }); break; }
     }
+    if (groups.every(gr => gr.length >= groupSize)) break;
   }
 
   // Calculate missing programs for each group
@@ -154,9 +158,7 @@ function reshuffleRespectingLocks(groups, programs, groupSize, seed) {
 
   const lockedPerGroup = groups.map(g => g.students.filter(s => s.locked));
   for (let i = 0; i < numGroups; i++) {
-    if (lockedPerGroup[i].length > groupSize) {
-      throw new Error(`Group ${i+1} exceeds size due to locked students`);
-    }
+    // If too many locks for the target size, keep all locks but we'll exceed coverage; capacity will be enforced later for unlocked fills
   }
 
   // Pool unlocked
@@ -168,16 +170,7 @@ function reshuffleRespectingLocks(groups, programs, groupSize, seed) {
   // Present programs per group (from locked)
   const presentPerGroup = lockedPerGroup.map(list => new Set(list.map(s => s.program)));
 
-  // Feasibility per program
-  const counts = {};
-  for (const s of unlockedPool) counts[s.program] = (counts[s.program] || 0) + 1;
-  for (const p of programs) {
-    const withP = presentPerGroup.reduce((acc, set) => acc + (set.has(p) ? 1 : 0), 0);
-    const required = Math.max(0, numGroups - withP);
-    if ((counts[p] || 0) < required) {
-      throw new Error(`Need at least ${required} unlocked '${p}' students to cover all groups`);
-    }
-  }
+  // Feasibility: no hard errors; we'll warn later via missing programs
 
   // Start with locked
   const result = lockedPerGroup.map(list => list.map(s => ({ ...s, locked: true })));
@@ -193,12 +186,10 @@ function reshuffleRespectingLocks(groups, programs, groupSize, seed) {
   for (let i = 0; i < numGroups; i++) {
     const present = presentPerGroup[i];
     const missing = programs.filter(p => !present.has(p));
-    if (result[i].length + missing.length > groupSize) {
-      throw new Error(`Group ${i+1} would exceed size when adding required programs`);
-    }
     for (const p of missing) {
+      if (result[i].length >= groupSize) break;
       const q = queues[p];
-      if (!q || q.length === 0) throw new Error(`Program queue empty for ${p}`);
+      if (!q || q.length === 0) continue; // can't satisfy, leave as missing
       result[i].push({ ...q.pop(), locked: false });
     }
   }
@@ -214,9 +205,7 @@ function reshuffleRespectingLocks(groups, programs, groupSize, seed) {
     for (let i = 1; i < result.length; i++) {
       if (result[i].length < minLen) { minLen = result[i].length; minIdx = i; }
     }
-    if (result[minIdx].length < groupSize) {
-      result[minIdx].push({ ...s, locked: false });
-    }
+    if (result[minIdx].length < groupSize) result[minIdx].push({ ...s, locked: false });
   }
 
   return result.map((students, i) => ({ index: i + 1, students }));
@@ -242,7 +231,6 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
   for (const s of unlockedPool) counts[s.program] = (counts[s.program] || 0) + 1;
 
   const numPrograms = programs.length;
-  if (numPrograms > groupSize) throw new Error(`group_size (${groupSize}) smaller than number of programs (${numPrograms})`);
   
   // Check which programs have enough students for all groups
   const programsWithEnough = [];
@@ -259,22 +247,19 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
   const result = Array.from({ length: targetNumGroups }, () => []);
   const presentPerGroup = Array.from({ length: targetNumGroups }, () => new Set());
 
-  // Place locked students. Keep within original group index if possible; overflow round-robin
-  let rr = 0;
-  for (let gi = 0; gi < groups.length; gi++) {
-    const lockedHere = groups[gi].students.filter(s => s.locked).map(s => ({ ...s, locked: true }));
-    for (const s of lockedHere) {
-      let targetIdx = gi < targetNumGroups ? gi : (rr++ % targetNumGroups);
-      if (result[targetIdx].length >= groupSize) {
-        // find next with space
-        let found = false;
-        for (let j = 0; j < targetNumGroups; j++) {
-          if (result[j].length < groupSize) { targetIdx = j; found = true; break; }
-        }
-        if (!found) throw new Error('Capacity full with locked students');
-      }
-      result[targetIdx].push({ name: s.name, program: s.program, locked: true });
-      presentPerGroup[targetIdx].add(s.program);
+  // Place locked cohorts: map each original locked group to a distinct target slot
+  const lockedGroups = groups
+    .map((g, idx) => ({ idx, locked: g.students.filter(s => s.locked).map(s => ({ ...s, locked: true })) }))
+    .filter(x => x.locked.length > 0);
+  if (lockedGroups.length > targetNumGroups) {
+    // Not possible to reduce number of groups without merging locked cohorts
+    throw new Error('Too many groups with locked students to merge without moving them.');
+  }
+  // Assign locked cohorts to the first N target groups
+  for (let i = 0; i < lockedGroups.length; i++) {
+    for (const s of lockedGroups[i].locked) {
+      result[i].push({ name: s.name, program: s.program, locked: true });
+      presentPerGroup[i].add(s.program);
     }
   }
 
@@ -286,10 +271,10 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
   // Fill missing programs per group first (only those with enough students)
   for (let i = 0; i < targetNumGroups; i++) {
     const missing = programsWithEnough.filter(p => !presentPerGroup[i].has(p));
-    if (result[i].length + missing.length > groupSize) throw new Error(`Group ${i+1} would exceed size when adding required programs`);
     for (const p of missing) {
+      if (result[i].length >= groupSize) break; // respect capacity first
       const q = queues[p];
-      if (!q || q.length === 0) throw new Error(`Program queue empty for ${p}`);
+      if (!q || q.length === 0) continue; // cannot satisfy, will warn later
       const s = q.pop();
       result[i].push({ ...s, locked: false });
       presentPerGroup[i].add(s.program);
@@ -300,13 +285,25 @@ function reshuffleRespectingLocksToGroupSize(groups, programs, groupSize, seed) 
   const leftover = [];
   for (const p in queues) leftover.push(...queues[p]);
   shuffleInPlace(leftover, rng);
+  // Prefer placing leftovers into groups without locked cohorts first, to allow merging lock-free groups
+  const targetOrder = Array.from({ length: targetNumGroups }, (_, i) => i)
+    .sort((a, b) => {
+      const aHasLocks = result[a].some(s => s.locked);
+      const bHasLocks = result[b].some(s => s.locked);
+      if (aHasLocks === bHasLocks) return result[a].length - result[b].length;
+      return aHasLocks ? 1 : -1; // groups without locks first
+    });
   for (const s of leftover) {
-    let minIdx = 0;
-    let minLen = result[0] ? result[0].length : 0;
-    for (let i = 1; i < result.length; i++) {
-      if (result[i].length < minLen) { minLen = result[i].length; minIdx = i; }
+    // pick the first group in order with capacity
+    let placed = false;
+    for (const idx of targetOrder) {
+      if (result[idx].length < groupSize) {
+        result[idx].push({ ...s, locked: false });
+        placed = true;
+        break;
+      }
     }
-    if (result[minIdx].length < groupSize) result[minIdx].push({ ...s, locked: false });
+    if (!placed) break;
   }
 
   // Calculate missing programs for each group
@@ -496,6 +493,78 @@ function updateCounts() {
     const count = g.querySelectorAll('.student').length;
     g.querySelector('.count').textContent = count;
   });
+}
+
+let groupFlashTimer = null;
+function showGroupBanner(message, kind = 'error') {
+  const shell = document.getElementById('groups-shell');
+  if (!shell) return;
+  let flash = document.getElementById('group-flash');
+  if (!flash) {
+    flash = document.createElement('ul');
+    flash.id = 'group-flash';
+    flash.className = 'flash';
+    shell.appendChild(flash);
+  }
+  const sameMessage = flash.textContent === message;
+  flash.innerHTML = `<li class="${kind}">${message}</li>`;
+  const li = flash.querySelector('li');
+  if (sameMessage) {
+    li.classList.remove('flash-bump');
+    void li.offsetWidth; // reflow to restart animation
+    li.classList.add('flash-bump');
+  }
+  try { flash.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch (_) {}
+  if (groupFlashTimer) clearTimeout(groupFlashTimer);
+  groupFlashTimer = setTimeout(() => {
+    if (!flash.parentNode) return;
+    li.classList.add('flash-fade');
+    setTimeout(() => { if (flash.parentNode) flash.remove(); }, 600);
+  }, 5000);
+}
+
+function clearGroupBanner() {
+  const flash = document.getElementById('group-flash');
+  if (flash) flash.remove();
+}
+
+function lockedStayInPlace(prevGroups, nextGroups) {
+  // Build original locked cohorts per group (as sets of keys) and a reverse map key->cohortId
+  const key = (s) => `${s.name}:::${s.program}`;
+  const cohorts = [];
+  const keyToCohort = new Map();
+  prevGroups.forEach((g, idx) => {
+    const set = new Set(g.students.filter(s => s.locked).map(key));
+    if (set.size > 0) {
+      const cohortId = cohorts.length;
+      cohorts.push(set);
+      for (const k of set) keyToCohort.set(k, cohortId);
+    }
+  });
+  // If there are no locked students at all, trivially ok
+  if (cohorts.length === 0) return true;
+  // Each cohort must appear entirely within a single next group, and no next group may contain locked from multiple cohorts
+  // Track which cohorts are satisfied and ensure injective mapping
+  const satisfied = new Array(cohorts.length).fill(false);
+  for (let i = 0; i < nextGroups.length; i++) {
+    const lockedKeys = nextGroups[i].students.filter(s => s.locked).map(key);
+    const cohortIdsInGroup = new Set();
+    for (const k of lockedKeys) {
+      if (keyToCohort.has(k)) cohortIdsInGroup.add(keyToCohort.get(k));
+    }
+    if (cohortIdsInGroup.size > 1) return false; // merged two cohorts
+    if (cohortIdsInGroup.size === 1) {
+      const cid = [...cohortIdsInGroup][0];
+      // group must contain all members of this cohort
+      for (const k of cohorts[cid]) {
+        if (!lockedKeys.includes(k)) return false; // split cohort
+      }
+      if (satisfied[cid]) return false; // same cohort mapped twice
+      satisfied[cid] = true;
+    }
+  }
+  // All cohorts must be satisfied
+  return satisfied.every(Boolean);
 }
 
 function validateConstraints(groups, programs, groupSize) {
@@ -747,12 +816,43 @@ els.setupForm.addEventListener('submit', async (e) => {
 
     // If CSV unchanged and we already have groups, do a lock-respecting reshuffle
     if (state.groups && state.groups.length > 0 && state.lastCsvText === text) {
+      // Guard: do not allow resizing that would move locked students
+      const payload = currentPayload();
+      const desired = desiredGroupSize;
+      // 1) Any group with more locked than desired size
+      const violatingByCount = payload.groups
+        .map((g, i) => ({ index: i + 1, locked: g.students.filter(s => s.locked).length }))
+        .filter(x => x.locked > desired);
+      if (violatingByCount.length > 0) {
+        const details = violatingByCount.map(v => `Group ${v.index}: ${v.locked} locked`).join(', ');
+        showGroupBanner(`Cannot apply group size ${desired} because some groups have more locked students than this size. Please unlock some students or choose a larger group size. (${details})`);
+        return;
+      }
+      // 2) If number of groups would shrink, ensure removed groups contain no locks
+      const totalStudents = payload.groups.reduce((acc, g) => acc + g.students.length, 0);
+      const targetNumGroups = Math.max(1, Math.ceil(totalStudents / desired));
+      const currentNumGroups = payload.groups.length;
+      if (targetNumGroups < currentNumGroups) {
+        const eliminated = payload.groups.slice(targetNumGroups);
+        const eliminatedWithLocks = eliminated
+          .map((g, idx) => ({ index: targetNumGroups + idx + 1, locked: g.students.filter(s => s.locked).length }))
+          .filter(x => x.locked > 0);
+        if (eliminatedWithLocks.length > 0) {
+          const details = eliminatedWithLocks.map(v => `Group ${v.index}: ${v.locked} locked`).join(', ');
+          showGroupBanner(`Cannot increase group size to ${desired} because it would reduce the number of groups from ${currentNumGroups} to ${targetNumGroups} and would require moving locked students. Please unlock students in the groups to be removed or choose a smaller increase. (${details})`);
+          return;
+        }
+      }
       state.groupSize = desiredGroupSize;
       state.theme = els.theme ? els.theme.value : state.theme;
-      const payload = currentPayload();
       const reshuffled = reshuffleRespectingLocksToGroupSize(payload.groups, state.programs, state.groupSize, seed);
+      if (!lockedStayInPlace(payload.groups, reshuffled)) {
+        showGroupBanner('Cannot apply this group size because it would require moving locked students. Please unlock students or choose a different size.');
+        return;
+      }
       state.groups = reshuffled;
       renderGroups(state.groups);
+      clearGroupBanner();
       enableControls(true);
       return;
     }
@@ -794,9 +894,9 @@ els.studentView.addEventListener('click', () => {
 
 // Group size + / - controls
 function applyNewGroupSize(newSize) {
-  const minSize = Math.max(1, state.programs.length || 0);
+  const minSize = 1;
   if (newSize < minSize) {
-    alert(`Group size cannot be less than number of programs (${state.programs.length || 0}).`);
+    showGroupBanner('Group size must be at least 1.');
     return;
   }
   const prev = state.groupSize || parseInt(els.groupSize.value || '4', 10);
@@ -806,15 +906,54 @@ function applyNewGroupSize(newSize) {
     els.groupSize.value = String(newSize);
     return;
   }
+  // Prevent resizing if any group has more locked students than the new size
+  const payloadBefore = currentPayload();
+  const violating = payloadBefore.groups
+    .map((g, i) => ({ index: i + 1, locked: g.students.filter(s => s.locked).length }))
+    .filter(x => x.locked > newSize);
+  if (violating.length > 0) {
+    const details = violating.map(v => `Group ${v.index}: ${v.locked} locked`).join(', ');
+    showGroupBanner(`Cannot apply group size ${newSize} because some groups have more locked students than this size. Please unlock some students or choose a larger group size. (${details})`);
+    return;
+  }
+  // If increasing size would reduce number of groups, and any eliminated group has locks, block
+  const totalStudents = payloadBefore.groups.reduce((acc, g) => acc + g.students.length, 0);
+  const targetNumGroups = Math.max(1, Math.ceil(totalStudents / newSize));
+  const currentNumGroups = payloadBefore.groups.length;
+  if (targetNumGroups < currentNumGroups) {
+    // Reducing groups: allowed only if we can merge groups without splitting any locked cohort
+    // Perform tentative reshuffle and validate. Catch errors to show banner.
+    try {
+      const tentative = reshuffleRespectingLocksToGroupSize(
+        payloadBefore.groups,
+        state.programs,
+        newSize,
+        els.seed.value ? parseInt(els.seed.value, 10) : undefined
+      );
+      if (!lockedStayInPlace(payloadBefore.groups, tentative)) {
+        showGroupBanner(`Cannot increase group size to ${newSize} because it would reduce the number of groups from ${currentNumGroups} to ${targetNumGroups} and would require splitting or moving locked students. Please unlock students or choose a different size.`);
+        return;
+      }
+    } catch (err) {
+      showGroupBanner(String(err));
+      return;
+    }
+  }
   try {
     const payload = currentPayload();
     const groups = reshuffleRespectingLocksToGroupSize(payload.groups, state.programs, newSize, els.seed.value ? parseInt(els.seed.value, 10) : undefined);
+    // Extra safety: verify no locked student moved groups
+    if (!lockedStayInPlace(payload.groups, groups)) {
+      showGroupBanner('Cannot apply this group size because it would require moving locked students. Please unlock students or choose a different size.');
+      return;
+    }
     state.groupSize = newSize;
     els.groupSize.value = String(newSize);
     state.groups = groups;
     renderGroups(groups);
+    clearGroupBanner();
   } catch (err) {
-    alert(String(err));
+    showGroupBanner(String(err));
     state.groupSize = prev;
     els.groupSize.value = String(prev);
   }
