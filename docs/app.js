@@ -961,34 +961,31 @@ function createClassHistoryList() {
 }
 
 // Global function for loading class from list
+function applyLoadedClassData(classData) {
+  if (!classData || !els.csvText) return;
+  els.csvText.value = classData.content;
+  if (els.className) els.className.value = classData.name;
+  if (classData.lastGroups && classData.lastGroups.length > 0) {
+    state.groups = classData.lastGroups;
+    state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
+    state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
+    state.lastCsvText = classData.content;
+    renderGroups(state.groups);
+    enableControls(true);
+  } else {
+    state.groups = [];
+    state.programs = [];
+    state.groupSize = 0;
+    state.lastCsvText = '';
+    renderGroups([]);
+    enableControls(false);
+  }
+}
+
 window.loadClassFromList = function(className) {
   const history = getClassHistory();
   const classData = history.find(item => item.name === className);
-  if (classData && els.csvText) {
-    els.csvText.value = classData.content;
-    // Also populate the class name field for easy editing
-    if (els.className) {
-      els.className.value = className;
-    }
-    
-    // Load the last groups if they exist
-    if (classData.lastGroups && classData.lastGroups.length > 0) {
-      state.groups = classData.lastGroups;
-      state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
-      state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
-      state.lastCsvText = classData.content;
-      renderGroups(state.groups);
-      enableControls(true);
-    } else {
-      // Clear any existing groups if no saved groups
-      state.groups = [];
-      state.programs = [];
-      state.groupSize = 0;
-      state.lastCsvText = '';
-      renderGroups([]);
-      enableControls(false);
-    }
-  }
+  applyLoadedClassData(classData);
 };
 
 // Global function for deleting a class
@@ -1057,48 +1054,19 @@ function showAllClassesModal(history) {
 window.loadClassFromModal = function(className) {
   const history = getClassHistory();
   const classData = history.find(item => item.name === className);
-  if (classData && els.csvText) {
-    els.csvText.value = classData.content;
-    // Also populate the class name field for easy editing
-    if (els.className) {
-      els.className.value = className;
-    }
-    
-    // Load the last groups if they exist
-    if (classData.lastGroups && classData.lastGroups.length > 0) {
-      state.groups = classData.lastGroups;
-      state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
-      state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
-      state.lastCsvText = classData.content;
-      renderGroups(state.groups);
-      enableControls(true);
-    } else {
-      // Clear any existing groups if no saved groups
-      state.groups = [];
-      state.programs = [];
-      state.groupSize = 0;
-      state.lastCsvText = '';
-      renderGroups([]);
-      enableControls(false);
-    }
-  }
+  applyLoadedClassData(classData);
 };
 
 function updateClassHistoryUI() {
   // Remove existing history list if present
-  const existing = document.querySelector('.saved-classes');
-  if (existing) {
-    existing.remove();
-  }
+  const mount = document.getElementById('saved-classes-mount');
+  if (!mount) return;
+  mount.innerHTML = '';
   
   // Add new history list if there are classes
   const historyList = createClassHistoryList();
   if (historyList) {
-    // Insert right after the class-name row in the CSV section
-    const classRow = document.querySelector('.row[style*="margin-top:2px"]');
-    if (classRow && classRow.parentNode) {
-      classRow.parentNode.insertBefore(historyList, classRow.nextSibling);
-    }
+    mount.appendChild(historyList);
   }
 }
 
@@ -1227,30 +1195,7 @@ function loadLastUsedClass() {
   if (history.length > 0 && els.csvText) {
     // Load the most recent class (first in the array)
     const lastClass = history[0];
-    els.csvText.value = lastClass.content;
-    
-    // Also populate the class name field for convenience
-    if (els.className) {
-      els.className.value = lastClass.name;
-    }
-    
-    // Load the last groups if they exist
-    if (lastClass.lastGroups && lastClass.lastGroups.length > 0) {
-      state.groups = lastClass.lastGroups;
-      state.programs = [...new Set(lastClass.lastGroups.flatMap(g => g.students.map(s => s.program)))];
-      state.groupSize = Math.max(...lastClass.lastGroups.map(g => g.students.length));
-      state.lastCsvText = lastClass.content;
-      renderGroups(state.groups);
-      enableControls(true);
-    } else {
-      // Clear any existing groups if no saved groups
-      state.groups = [];
-      state.programs = [];
-      state.groupSize = 0;
-      state.lastCsvText = '';
-      renderGroups([]);
-      enableControls(false);
-    }
+    applyLoadedClassData(lastClass);
   }
 }
 

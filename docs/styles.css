@@ -42,6 +42,12 @@ input, button, select {
   border-radius: 8px;
   padding: 10px 12px;
 }
+/* Consistent focus style across inputs */
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
 /* Narrower width specifically for the group size field */
 #group_size { width: 100px; }
 #class-name { width: 140px; }
@@ -64,6 +70,23 @@ textarea.drag-over {
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
 }
 select { width: 100%; }
+/* Improve theme dropdown appearance */
+#theme {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M6 8l4 4 4-4' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 16px 16px;
+  padding-right: 36px; /* room for arrow */
+  height: 40px;
+  line-height: 1.2;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  cursor: pointer;
+}
+#theme:hover { border-color: #cbd5e1; }
 /* Hide number input spinners/arrows */
 /* Chrome, Safari, Edge, Opera */
 input[type=number]::-webkit-outer-spin-button,
