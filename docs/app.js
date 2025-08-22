@@ -338,6 +338,7 @@ const els = {
   className: document.getElementById('class-name'),
   saveClass: document.getElementById('save-class'),
   loadFileLink: document.getElementById('load-file-link'),
+  absentList: document.getElementById('absent-list'),
 };
 
 let state = {
@@ -346,7 +347,10 @@ let state = {
   groups: [],
   theme: 'numeric',
   lastCsvText: '',
+  absentStudents: [], // { name, program }
 };
+
+let lastProgramColors = {};
 
 // Initialize state.groupSize from the current input default
 state.groupSize = parseInt(els.groupSize.value || '4', 10) || 0;
@@ -363,9 +367,13 @@ function renderGroups(groups) {
   els.groups.innerHTML = '';
   const names = themedGroupNames(groups.length, state.theme);
   
-  // Generate colors for each unique program
-  const uniquePrograms = [...new Set(groups.flatMap(g => g.students.map(s => s.program)))];
+  // Generate colors for each unique program (including absent students)
+  const uniquePrograms = [...new Set([
+    ...groups.flatMap(g => g.students.map(s => s.program)),
+    ...state.absentStudents.map(s => s.program)
+  ])];
   const programColors = getProgramColors(uniquePrograms);
+  lastProgramColors = programColors;
   
   // Set minHeight to match sidebar to reduce jump; will expand if content exceeds
   const sidebar = document.querySelector('.sidebar');
@@ -399,8 +407,10 @@ function renderGroups(groups) {
     for (const s of g.students) list.appendChild(createStudentLi(s, programColors));
     els.groups.appendChild(section);
   }
+  renderAbsentList(programColors);
   bindDnD();
   bindLockButtons();
+  bindAbsentButtons();
 }
 
 function createStudentLi(s, programColors) {
@@ -412,9 +422,28 @@ function createStudentLi(s, programColors) {
   if (s.locked) li.classList.add('is-locked');
   const lockIcon = s.locked ? '🔒' : '🔓';
   const programColor = programColors[s.program] || '#666';
-  li.innerHTML = `<span class="name">${s.name}</span><span class="actions"><span class="tag" style="background-color: ${programColor}">${s.program}</span><button class="lock-btn" title="Toggle lock" aria-label="Toggle lock" draggable="false">${lockIcon}</button></span>`;
+  li.innerHTML = `<span class="name">${s.name}</span><span class="actions"><span class="tag" style="background-color: ${programColor}">${s.program}</span><button class="lock-btn" title="Toggle lock" aria-label="Toggle lock" draggable="false">${lockIcon}</button><button class="absent-btn" title="Mark absent" aria-label="Mark absent" draggable="false">Absent</button></span>`;
   li.setAttribute('draggable', 'true');
   return li;
+}
+
+function createAbsentLi(s, programColors) {
+  const li = document.createElement('li');
+  li.className = 'student';
+  li.dataset.name = s.name;
+  li.dataset.program = s.program;
+  const programColor = (programColors && programColors[s.program]) || '#666';
+  li.innerHTML = `<span class="name">${s.name}</span><span class="actions"><span class="tag" style="background-color: ${programColor}">${s.program}</span><button class="present-btn" title="Mark present" aria-label="Mark present" draggable="false">Present</button></span>`;
+  li.setAttribute('draggable', 'true');
+  return li;
+}
+
+function renderAbsentList(programColors) {
+  if (!els.absentList) return;
+  els.absentList.innerHTML = '';
+  for (const s of state.absentStudents) {
+    els.absentList.appendChild(createAbsentLi(s, programColors));
+  }
 }
 
 function currentPayload() {
@@ -426,13 +455,15 @@ function currentPayload() {
     }));
     return { index: i + 1, students };
   });
-  return { groups };
+  return { groups, absent: state.absentStudents.slice() };
 }
 
 function bindDnD() {
   let dragged = null;
 
   document.querySelectorAll('.student').forEach(item => {
+    if (item.dataset.dndBound === 'true') return;
+    item.dataset.dndBound = 'true';
     item.setAttribute('draggable', 'true');
     item.addEventListener('dragstart', (e) => {
       if (item.dataset.locked === 'true') { e.preventDefault(); return; }
@@ -453,6 +484,8 @@ function bindDnD() {
   });
 
   document.querySelectorAll('.student-list').forEach(list => {
+    if (list.dataset.dropBound === 'true') return;
+    list.dataset.dropBound = 'true';
     list.addEventListener('dragover', (e) => {
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
@@ -464,12 +497,62 @@ function bindDnD() {
     list.addEventListener('drop', (e) => {
       e.preventDefault();
       list.classList.remove('drag-over');
-      if (dragged && dragged.dataset.locked !== 'true') {
+      if (!dragged) return;
+      if (dragged.dataset.locked === 'true') return;
+      const fromAbsent = dragged.closest('#absent-list') || dragged.querySelector('.present-btn');
+      if (fromAbsent) {
+        const name = dragged.dataset.name;
+        const program = dragged.dataset.program;
+        // Remove from absent state and DOM node
+        state.absentStudents = state.absentStudents.filter(s => !(s.name === name && s.program === program));
+        try { dragged.remove(); } catch (_) {}
+        // Ensure no duplicates in groups
+        removeStudentFromGroups(name, program);
+        // Create proper group LI
+        const presentLi = createStudentLi({ name, program, locked: false }, lastProgramColors);
+        list.appendChild(presentLi);
+        bindLockButtons();
+        bindAbsentButtons();
+        bindDnD();
+        updateCounts();
+      } else {
         list.appendChild(dragged);
         updateCounts();
       }
     });
   });
+
+  // Absent list DnD target
+  if (els.absentList) {
+    if (els.absentList.dataset.dropBound === 'true') return;
+    els.absentList.dataset.dropBound = 'true';
+    els.absentList.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      els.absentList.classList.add('drag-over');
+    });
+    els.absentList.addEventListener('dragleave', () => {
+      els.absentList.classList.remove('drag-over');
+    });
+    els.absentList.addEventListener('drop', (e) => {
+      e.preventDefault();
+      els.absentList.classList.remove('drag-over');
+      if (!dragged) return;
+      const name = dragged.dataset.name;
+      const program = dragged.dataset.program;
+      // Remove from DOM and push to absent
+      dragged.remove();
+      // Ensure unlocked when absent
+      const idx = state.absentStudents.findIndex(s => s.name === name && s.program === program);
+      if (idx === -1) {
+        state.absentStudents.push({ name, program });
+        renderAbsentList(lastProgramColors);
+        bindAbsentButtons();
+        bindDnD();
+      }
+      updateCounts();
+    });
+  }
 }
 
 function bindLockButtons() {
@@ -488,10 +571,73 @@ function bindLockButtons() {
   });
 }
 
+function bindAbsentButtons() {
+  // Mark absent from group lists
+  document.querySelectorAll('.absent-btn').forEach(btn => {
+    if (btn.dataset.clickBound === 'true') return;
+    btn.dataset.clickBound = 'true';
+    btn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const li = e.currentTarget.closest('.student');
+      const name = li.dataset.name;
+      const program = li.dataset.program;
+      // Remove from DOM group list
+      li.remove();
+      // Add to absent state and re-render absent list
+      if (!state.absentStudents.some(s => s.name === name && s.program === program)) {
+        state.absentStudents.push({ name, program });
+      }
+      renderAbsentList(lastProgramColors);
+      bindAbsentButtons();
+      bindDnD();
+      updateCounts();
+    });
+  });
+
+  // Mark present from absent list
+  if (els.absentList) {
+    els.absentList.querySelectorAll('.present-btn').forEach(btn => {
+      if (btn.dataset.clickBound === 'true') return;
+      btn.dataset.clickBound = 'true';
+      btn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const li = e.currentTarget.closest('.student');
+        const name = li.dataset.name;
+        const program = li.dataset.program;
+        // Remove from absent state
+        state.absentStudents = state.absentStudents.filter(s => !(s.name === name && s.program === program));
+        // Remove LI
+        li.remove();
+        // Add back to the smallest group
+        const groupLists = Array.from(document.querySelectorAll('.student-list'));
+        if (groupLists.length > 0) {
+          const smallest = groupLists.reduce((min, el) => el.children.length < min.children.length ? el : min, groupLists[0]);
+          // Ensure no duplicates in groups
+          removeStudentFromGroups(name, program);
+          const presentLi = createStudentLi({ name, program, locked: false }, lastProgramColors);
+          smallest.appendChild(presentLi);
+          bindLockButtons();
+          bindAbsentButtons();
+          bindDnD();
+          updateCounts();
+        }
+      });
+    });
+  }
+}
+
 function updateCounts() {
   document.querySelectorAll('.group').forEach(g => {
     const count = g.querySelectorAll('.student').length;
     g.querySelector('.count').textContent = count;
+  });
+}
+
+function removeStudentFromGroups(name, program) {
+  document.querySelectorAll('.group .student').forEach(li => {
+    if (li.dataset && li.dataset.name === name && li.dataset.program === program) {
+      li.remove();
+    }
   });
 }
 
@@ -579,8 +725,13 @@ function validateConstraints(groups, programs, groupSize) {
 }
 
 function exportCSV(groups) {
-  const lines = ['group,name,program'];
-  for (const g of groups) for (const s of g.students) lines.push(`${g.index},${s.name},${s.program}`);
+  const lines = ['group,name,program,status'];
+  // Present students from groups
+  for (const g of groups) {
+    for (const s of g.students) lines.push(`${g.index},${s.name},${s.program},present`);
+  }
+  // Absent students
+  for (const s of state.absentStudents) lines.push(`,${s.name},${s.program},absent`);
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
@@ -624,6 +775,12 @@ function exportMarkdown(groups, theme) {
       lines.push(`- ${s.name} (${s.program})`);
     }
   }
+  if (state.absentStudents.length > 0) {
+    lines.push(`\n## Absent`);
+    for (const s of state.absentStudents) {
+      lines.push(`- ${s.name} (${s.program})`);
+    }
+  }
   const content = lines.join('\n');
   const url = 'data:text/plain;charset=utf-8,' + encodeURIComponent(content);
   const opened = window.open(url, '_blank', 'noopener,noreferrer');
@@ -643,7 +800,10 @@ function openStudentView(groups, theme) {
   const names = themedGroupNames(groups.length, theme);
   
   // Generate colors for each unique program
-  const uniquePrograms = [...new Set(groups.flatMap(g => g.students.map(s => s.program)))];
+  const uniquePrograms = [...new Set([
+    ...groups.flatMap(g => g.students.map(s => s.program)),
+    ...state.absentStudents.map(s => s.program)
+  ])];
   const programColors = getProgramColors(uniquePrograms);
   
   // Create clean HTML for student view
@@ -858,7 +1018,9 @@ els.setupForm.addEventListener('submit', async (e) => {
     }
 
     // Otherwise, parse and generate fresh groups
-    const students = parseCSV(text);
+    const studentsAll = parseCSV(text);
+    // Filter out previously marked absent if they exist in this CSV
+    const students = studentsAll.filter(s => !state.absentStudents.some(a => a.name === s.name && a.program === s.program));
     const result = groupStudents(students, desiredGroupSize, seed);
     state.programs = result.programs;
     state.groupSize = result.groupSize;
@@ -1109,6 +1271,7 @@ function applyLoadedClassData(classData) {
     state.programs = [...new Set(classData.lastGroups.flatMap(g => g.students.map(s => s.program)))];
     state.groupSize = Math.max(...classData.lastGroups.map(g => g.students.length));
     state.lastCsvText = classData.content;
+    state.absentStudents = Array.isArray(classData.absent) ? classData.absent : [];
     renderGroups(state.groups);
     enableControls(true);
   } else {
@@ -1116,6 +1279,7 @@ function applyLoadedClassData(classData) {
     state.programs = [];
     state.groupSize = 0;
     state.lastCsvText = '';
+    state.absentStudents = [];
     renderGroups([]);
     enableControls(false);
   }
@@ -1287,10 +1451,21 @@ function saveClass() {
   // Save the class with current groups if they exist
   saveClassList(className, content);
   
-  // If groups exist in the DOM, save the current DOM state (includes locks and manual changes)
+  // If groups exist in the DOM, save the current DOM state (includes locks/manual and absent)
   const payload = currentPayload();
   if (payload.groups && payload.groups.length > 0) {
-    updateClassWithGroups(className, payload.groups);
+    const dataToSave = payload.groups;
+    // Attach absent into a sidecar so it persists
+    try {
+      const history = getClassHistory();
+      const idx = history.findIndex(item => item.name === className);
+      if (idx !== -1) {
+        history[idx].lastGroups = dataToSave;
+        history[idx].absent = state.absentStudents.slice();
+        localStorage.setItem(CLASS_HISTORY_KEY, JSON.stringify(history));
+      }
+    } catch (_) {}
+    updateClassWithGroups(className, dataToSave);
   }
   
   updateClassHistoryUI();

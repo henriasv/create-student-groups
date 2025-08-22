@@ -1,3 +1,28 @@
+/* Absent list styles */
+.absent-list {
+  list-style: none;
+  padding-left: 0;
+  margin: 6px 0 0 0;
+  min-height: 24px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.absent-list.drag-over {
+  background: rgba(0,0,0,0.03);
+}
+.absent-list .student {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.absent-list .student:last-child {
+  border-bottom: none;
+}
+.absent-list .actions .tag {
+  margin-right: 6px;
+}
 :root {
   --bg: #f6f7fb;
   --panel: #ffffff;
